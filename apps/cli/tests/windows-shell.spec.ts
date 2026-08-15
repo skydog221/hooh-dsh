@@ -122,16 +122,26 @@ describe('shipped agent presets gate both shell tools by platform', () => {
     }
   })
 
-  it('minimal mounts no shell tool row at all (its shell is the PTY stack)', () => {
+  it('minimal selects the POSIX PTY or Windows PowerShell shell by platform', () => {
     const entries: unknown = yaml.load(
       readFileSync(join(presetRoot, 'minimal', 'agent.cordis.yml'), 'utf8'),
       { schema: entryListSchema },
     )
     if (!Array.isArray(entries)) throw new TypeError('minimal preset must parse to an entry array')
-    for (const id of ['tool-bash', 'tool-pwsh']) {
-      expect(entries.some(entry => (
+    const entryList = entries as unknown[]
+    const row = (id: string): Record<string, unknown> => {
+      const found = entryList.find(entry => (
         typeof entry === 'object' && entry !== null && (entry as Record<string, unknown>).id === id
-      )), `${id} must be absent from minimal`).toBe(false)
+      ))
+      if (typeof found !== 'object' || found === null) throw new TypeError(`minimal preset must mount ${id}`)
+      return found as Record<string, unknown>
     }
+    const persistentShell = row('persistent-shell')
+    const pwsh = row('tool-pwsh')
+    expect(disabledOn(persistentShell, 'linux'), 'minimal PTY shell on linux').toBe(false)
+    expect(disabledOn(persistentShell, 'win32'), 'minimal PTY shell on win32').toBe(true)
+    expect(disabledOn(pwsh, 'linux'), 'minimal pwsh on linux').toBe(true)
+    expect(disabledOn(pwsh, 'win32'), 'minimal pwsh on win32').toBe(false)
+    expect(pwsh.config).toEqual({ enableRunInBackground: false })
   })
 })

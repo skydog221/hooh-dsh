@@ -161,7 +161,7 @@ describe('web e2e: agent-preset authoring is a host-side copy', () => {
     expect(composition).toBe(await readFile(join(SHIPPED_PRESETS, 'minimal', 'agent.cordis.yml'), 'utf8'))
     const metadata = await readFile(join(userRoot, 'my-agent', 'preset.yml'), 'utf8')
     expect(metadata).toContain('name: 我的模式')
-    expect(metadata).toContain('description: 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。')
+    expect(metadata).toContain('description: 仅提供平台原生 Shell 与 str_replace_editor 的双工具编码 Agent（POSIX 使用持久 Bash，Windows 使用 PowerShell）。')
     expect(metadata).not.toContain('order:')
   }, 60_000)
 

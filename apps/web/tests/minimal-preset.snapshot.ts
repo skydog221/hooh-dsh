@@ -12,6 +12,7 @@ import { assertFixtureInventory, launchWebScaffold, type WebScaffold } from './s
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/minimal-preset', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
 const PROMPT = 'Reply exactly MINIMAL_PRESET_REQUEST_OK and stop.'
+const MINIMAL_SHELL = process.platform === 'win32' ? 'pwsh' : 'bash'
 
 describe('minimal agent preset', () => {
   let scaffold: WebScaffold
@@ -46,7 +47,7 @@ describe('minimal agent preset', () => {
     if (failures.length > 1) throw new AggregateError(failures, 'minimal preset smoke teardown failed')
   })
 
-  it('sends the exact RL prompt and schemas, then executes the persistent shell and editor', async () => {
+  it('sends the exact RL prompt and schemas, then executes the platform shell and editor', async () => {
     agentHandle.agent.followup(createUserMessage({
       content: [{ type: 'text', text: PROMPT }],
       source: { kind: 'user' },
@@ -66,20 +67,31 @@ describe('minimal agent preset', () => {
     const stateDir = join(scaffold.workspaceCwd, 'persistent-state')
     await mkdir(stateDir)
     const signal = new AbortController().signal
-    await scaffold.ctx.tools.execute({
+    if (MINIMAL_SHELL === 'bash') await scaffold.ctx.tools.execute({
       signal,
       callId: CallId('minimal-bash-state-setup'),
       name: 'bash',
       arguments: { command: `cd ${JSON.stringify(stateDir)} && export DSH_MINIMAL_STATE=PERSISTED` },
       agent: agentHandle.agent,
     })
-    const bash = await scaffold.ctx.tools.execute({
-      signal,
-      callId: CallId('minimal-bash-state-read'),
-      name: 'bash',
-      arguments: { command: 'printf \'%s:%s\n\' "$DSH_MINIMAL_STATE" "$PWD"' },
-      agent: agentHandle.agent,
-    })
+    const shell = MINIMAL_SHELL === 'bash'
+      ? await scaffold.ctx.tools.execute({
+        signal,
+        callId: CallId('minimal-bash-state-read'),
+        name: 'bash',
+        arguments: { command: 'printf \'%s:%s\n\' "$DSH_MINIMAL_STATE" "$PWD"' },
+        agent: agentHandle.agent,
+      })
+      : await scaffold.ctx.tools.execute({
+        signal,
+        callId: CallId('minimal-pwsh-state-read'),
+        name: 'pwsh',
+        arguments: {
+          command: 'Write-Output MINIMAL_PWSH_OK',
+          description: 'Verify PowerShell support',
+        },
+        agent: agentHandle.agent,
+      })
     const seedPath = join(scaffold.workspaceCwd, 'preset-smoke.txt')
     await writeFile(seedPath, 'MINIMAL_EDITOR_OK\n')
     const editor = await scaffold.ctx.tools.execute({
@@ -90,17 +102,20 @@ describe('minimal agent preset', () => {
       agent: agentHandle.agent,
     })
 
-    const text = (result: typeof bash): string => result.content
+    const text = (result: typeof shell): string => result.content
       .filter(block => block.type === 'text')
       .map(block => block.text)
       .join('')
       .replaceAll(scaffold.workspaceCwd, '{{cwd}}')
       .trimEnd()
 
-    expect({
+    expect(requestHeader.system).toBe('You are a helpful software engineer assistant.')
+    expect(requestHeader.tools?.map(tool => tool.name)).toEqual([MINIMAL_SHELL, 'str_replace_editor'])
+    expect(text(editor)).toContain('MINIMAL_EDITOR_OK')
+    if (MINIMAL_SHELL === 'bash') expect({
       prompt: requestHeader.system,
       tools: requestHeader.tools?.map(tool => tool.name),
-      bash: text(bash),
+      bash: text(shell),
       editor: text(editor),
     }).toMatchInlineSnapshot(`
       {
@@ -115,6 +130,7 @@ describe('minimal agent preset', () => {
         ],
       }
     `)
+    else expect(text(shell)).toContain('MINIMAL_PWSH_OK')
     expect(requestHeader.tools?.toSorted((left, right) => left.name.localeCompare(right.name)))
       .toEqual(scaffold.ctx.tools.schemas(agentHandle.agent).toSorted((left, right) => left.name.localeCompare(right.name)))
     await assertFixtureInventory(SNAPSHOT_DIR, ['session.jsonl'])
