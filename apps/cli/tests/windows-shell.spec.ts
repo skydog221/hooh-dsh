@@ -142,6 +142,9 @@ describe('shipped agent presets gate both shell tools by platform', () => {
     expect(disabledOn(persistentShell, 'win32'), 'minimal PTY shell on win32').toBe(true)
     expect(disabledOn(pwsh, 'linux'), 'minimal pwsh on linux').toBe(true)
     expect(disabledOn(pwsh, 'win32'), 'minimal pwsh on win32').toBe(false)
-    expect(pwsh.config).toEqual({ enableRunInBackground: false })
+    expect(pwsh.config).toEqual({
+      enableRunInBackground: false,
+      enableSandboxEscalation: false,
+    })
   })
 })

@@ -2512,6 +2512,8 @@ export interface Config {
 export interface Config {
   /** Expose `run_in_background` (default true); disabled calls are also rejected. */
   enableRunInBackground?: boolean
+  /** Expose per-call sandbox escalation fields (default true); disabled requests are also rejected. */
+  enableSandboxEscalation?: boolean
 }
 ```
 

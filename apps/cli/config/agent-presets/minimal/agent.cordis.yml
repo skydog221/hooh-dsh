@@ -48,12 +48,15 @@
 
 # Windows keeps the same two-tool surface with the native PowerShell consumer.
 # Each call starts a fresh pwsh process; background execution stays unavailable
-# because this preset deliberately omits the job-management tools.
+# because this preset deliberately omits the job-management tools. The fixed
+# two-tool contract also omits approval-dependent retries; commands still run
+# under the host's standing sandbox policy.
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
   config:
     enableRunInBackground: false
+    enableSandboxEscalation: false
 
 # The bare local filesystem shadows the host's sandboxed provider only for this
 # preset. The editor shares that realm and requires absolute paths.

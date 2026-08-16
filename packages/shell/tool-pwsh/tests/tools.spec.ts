@@ -202,7 +202,7 @@ class ConfiningFakeBash extends ShellExecutor {
 }
 
 /** Sandboxed composition: the shared policy service + a confining executor + the pwsh tool (+ optional approval). */
-async function setupSandboxed(withApproval = false) {
+async function setupSandboxed(withApproval = false, toolConfig: Partial<ToolPwsh.Config> = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -213,7 +213,7 @@ async function setupSandboxed(withApproval = false) {
   await ctx.plugin(SandboxPolicyService, {})
   await ctx.plugin(ConfiningFakeBash)
   if (withApproval) await ctx.plugin(ApprovalService)
-  await ctx.plugin(ToolPwsh)
+  await ctx.plugin(ToolPwsh, toolConfig)
   const bash = ctx.shell as ConfiningFakeBash
   return { ctx, bash }
 }
@@ -579,6 +579,27 @@ describe('sandbox escalation through ctx.approval', () => {
     expect(schema.description).not.toContain('named pipes')
     expect(schema.description).not.toContain('sandbox_permissions')
     expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
+  })
+
+  it('can hide escalation fields while retaining confinement guidance and the standing policy', async () => {
+    const { ctx, bash } = await setupSandboxed(false, { enableSandboxEscalation: false })
+    const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
+    expect(schema.description).toContain('ConstrainedLanguage')
+    expect(schema.description).toContain('programs cannot open named pipes')
+    expect(schema.description).not.toContain('approval prompt')
+    expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
+    expect(schema.parameters.properties).not.toHaveProperty('justification')
+
+    const ordinary = await call(ctx, 'pwsh', {
+      command: 'Write-Output ok',
+      description: 'run ordinary confined command',
+    }, sandboxAgent('workspace-write'))
+    expect(ordinary.isError).toBe(false)
+    expect(bash.modes).toEqual(['workspace-write'])
+
+    const injected = await call(ctx, 'pwsh', escalate, sandboxAgent())
+    expect(text(injected)).toContain('sandbox escalation is disabled for this deployment')
+    expect(bash.modes).toEqual(['workspace-write'])
   })
 
   it('rejects injected escalation without a sandbox and non-widening escalation without prompting', async () => {
