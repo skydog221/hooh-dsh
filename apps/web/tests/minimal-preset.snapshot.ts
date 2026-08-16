@@ -130,7 +130,12 @@ describe('minimal agent preset', () => {
         ],
       }
     `)
-    else expect(text(shell)).toContain('MINIMAL_PWSH_OK')
+    else {
+      expect(text(shell)).toContain('MINIMAL_PWSH_OK')
+      const pwshSchema = requestHeader.tools?.find(tool => tool.name === 'pwsh')
+      expect(pwshSchema?.parameters.properties).not.toHaveProperty('sandbox_permissions')
+      expect(pwshSchema?.parameters.properties).not.toHaveProperty('justification')
+    }
     expect(requestHeader.tools?.toSorted((left, right) => left.name.localeCompare(right.name)))
       .toEqual(scaffold.ctx.tools.schemas(agentHandle.agent).toSorted((left, right) => left.name.localeCompare(right.name)))
     await assertFixtureInventory(SNAPSHOT_DIR, ['session.jsonl'])

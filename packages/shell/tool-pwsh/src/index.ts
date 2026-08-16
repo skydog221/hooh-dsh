@@ -52,11 +52,14 @@ export const inject = ['tools', 'shell', 'systemPrompt', 'shellEnv']
 export interface Config {
   /** Expose `run_in_background` (default true); disabled calls are also rejected. */
   enableRunInBackground?: boolean
+  /** Expose per-call sandbox escalation fields (default true); disabled requests are also rejected. */
+  enableSandboxEscalation?: boolean
 }
 
 /** Runtime configuration schema for the pwsh tool plugin. */
 export const Config: z<Config> = z.object({
   enableRunInBackground: z.boolean().default(true),
+  enableSandboxEscalation: z.boolean().default(true),
 })
 
 /** Parsed tool args; execute validates value constraints absent from ParameterSchemaSpec. */
@@ -100,7 +103,11 @@ function validatePwshArgs(args: PwshToolArgs): void {
 }
 /* jscpd:ignore-end */
 
-function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
+function pwshDescription(
+  backgroundEnabled: boolean,
+  sandboxed: boolean,
+  escalationModes: readonly SandboxMode[],
+): string {
   const background = backgroundEnabled
     ? 'Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.'
     : 'Background execution is not available; long-running commands must finish within the timeout.'
@@ -113,15 +120,13 @@ function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly S
     + 'Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. '
     + 'On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. '
     + background
-  if (escalationModes.length === 0) return base
+  if (!sandboxed) return base
   // The language-mode and named-pipe contracts below are Windows-restricted-token
-  // behavior, but the gate is 'any confining executor is mounted'
-  // (escalationModes non-empty). The conflation is safe today because every
-  // shipped composition pairing tool-pwsh with a confining executor is
-  // win32-only; a future POSIX pwsh-sandbox composition must gate both
-  // sentences on the platform instead (tracked in the pwsh-tool-and-executor
+  // behavior. Every shipped composition pairing tool-pwsh with a confining
+  // executor is win32-only; a future POSIX pwsh-sandbox composition must gate
+  // these sentences on the platform instead (tracked in the pwsh-tool-and-executor
   // Agent Note).
-  return base + ' Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while '
+  const confinement = ' Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while '
     + 'workspace-write stays in FullLanguage unless host policy says otherwise. In read-only, prefer cmdlets and core types (`[string]`, `[datetime]`, `[regex]`, `[guid]`); '
     + '.NET static calls (`[System.IO.*]::`, `[math]::`), `Add-Type`, COM objects, and reflection fail '
     + 'with "only core types" errors. `-f` formatting, property access, and core cmdlets work. '
@@ -129,8 +134,9 @@ function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly S
     + 'program\'s output through piped stdio (Node.js `child_process.spawn`/`exec` with the default '
     + '`stdio: \'pipe\'`) fails with EPERM, while `stdio: \'inherit\'` and `stdio: \'ignore\'` spawns '
     + 'work and PowerShell\'s own pipelines are unaffected. That EPERM is the documented boundary: '
-    + 'do not retry the command another way — escalate the exact command once or restructure it to '
-    + 'avoid capturing output. '
+    + 'do not retry the command another way; restructure it to avoid capturing output.'
+  if (escalationModes.length === 0) return base + confinement
+  return base + confinement + ' '
     + 'Attempting a command the sandbox may deny is safe and expected: run it and read the '
     + 'marker rather than assuming the denial. When a command is denied and a wider mode would let it '
     + 'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry '
@@ -195,10 +201,12 @@ const BACKGROUND_OUTPUT_PROPERTIES = {
 /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's apply() preamble (pwsh-tool-and-executor Agent Note). */
 export function apply(ctx: Context, config: Config = {}): void {
   const backgroundEnabled = config.enableRunInBackground ?? true
+  const sandboxEscalationEnabled = config.enableSandboxEscalation ?? true
   const defaultMode = ctx.shell.sandboxMode
-  const escalationModes: readonly SandboxMode[] = defaultMode === undefined ? [] : ESCALATION_TARGETS
-  const sandboxPolicy: SandboxPolicyService | undefined = defaultMode === undefined ? undefined : ctx.get('sandboxPolicy')
-  if (defaultMode !== undefined && sandboxPolicy === undefined) {
+  const sandboxed = defaultMode !== undefined
+  const escalationModes: readonly SandboxMode[] = sandboxed && sandboxEscalationEnabled ? ESCALATION_TARGETS : []
+  const sandboxPolicy: SandboxPolicyService | undefined = sandboxed ? ctx.get('sandboxPolicy') : undefined
+  if (sandboxed && sandboxPolicy === undefined) {
     throw new Error('tool-pwsh: the mounted bash executor confines but ctx.sandboxPolicy is missing')
   }
   /* jscpd:ignore-end */
@@ -225,7 +233,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     exec: ToolExecution,
     standingPolicy: SandboxExecutionPolicy | undefined,
   ): Promise<SandboxMode> => {
-    if (escalationModes.length === 0) {
+    if (!sandboxEscalationEnabled) {
+      throw new Error('sandbox escalation is disabled for this deployment (enableSandboxEscalation: false)')
+    }
+    if (!sandboxed) {
       throw new Error('sandbox_permissions is not available in this composition (no sandboxing executor to escalate)')
     }
     const effectiveMode = (standingPolicy as SandboxExecutionPolicy).mode
@@ -251,7 +262,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'pwsh',
-    description: pwshDescription(backgroundEnabled, escalationModes),
+    description: pwshDescription(backgroundEnabled, sandboxed, escalationModes),
     /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's parameter surface (pwsh-tool-and-executor Agent Note). */
     parameters: {
       command: { type: 'string', required: true, description: 'The PowerShell command to execute.' },
