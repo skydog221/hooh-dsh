@@ -2,8 +2,8 @@
 #
 # The persona is the complete system prompt, so global identity, Web orientation,
 # tool guidance, and later assembly listeners cannot add prompt text. Runtime
-# context snapshots are suppressed for this preset, and the model composes only
-# persistent `bash` and `str_replace_editor`. Context compaction is absent.
+# context snapshots are suppressed for this preset, and the model composes one
+# platform-native shell plus `str_replace_editor`. Context compaction is absent.
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
@@ -18,6 +18,9 @@
 - id: persistent-shell
   name: cordis:group
   group: true
+  # The PTY backend and persistent Bash consumer require a POSIX terminal
+  # substrate. Windows uses the native PowerShell consumer below instead.
+  disabled: !!js process.platform === 'win32'
   isolate:
     terminals: true
   config:
@@ -42,6 +45,15 @@
           * To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.
           * Please avoid commands that may produce a very large amount of output.
           * Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
+
+# Windows keeps the same two-tool surface with the native PowerShell consumer.
+# Each call starts a fresh pwsh process; background execution stays unavailable
+# because this preset deliberately omits the job-management tools.
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+  config:
+    enableRunInBackground: false
 
 # The bare local filesystem shadows the host's sandboxed provider only for this
 # preset. The editor shares that realm and requires absolute paths.

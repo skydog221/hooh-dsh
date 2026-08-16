@@ -43,7 +43,7 @@
         - text: 复制
     - listitem:
       - 'button "设为默认: 极简模式"':
-        - text: 极简模式 内置 仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。
+        - text: 极简模式 内置 仅提供平台原生 Shell 与 str_replace_editor 的双工具编码 Agent（POSIX 使用持久 Bash，Windows 使用 PowerShell）。
         - code: minimal
       - 'button "查看: 极简模式"':
         - img
